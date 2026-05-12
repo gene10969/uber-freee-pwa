@@ -23,6 +23,8 @@ function tx(mode='readonly'){ return db.transaction(STORE,mode).objectStore(STOR
 function getAll(){ return new Promise((resolve)=>{ const r=tx().getAll(); r.onsuccess=()=>resolve(r.result||[]); }); }
 function put(record){ return new Promise((resolve)=>{ const r=tx('readwrite').put(record); r.onsuccess=()=>resolve(); }); }
 function clearDB(){ return new Promise((resolve)=>{ const r=tx('readwrite').clear(); r.onsuccess=()=>resolve(); }); }
+function deleteRecord(id){ return new Promise((resolve)=>{ const r=tx('readwrite').delete(id); r.onsuccess=()=>resolve(); }); }
+async function cleanupBrokenUber(){ const records=await getAll(); const bad=records.filter(r=>r.source==='UberEats PDF' && (!Number(r.amount) || Number(r.amount)<=0)); for(const r of bad) await deleteRecord(r.id); if(bad.length) toast(`${bad.length}件の0円Uber取込データを自動削除しました`); }
 
 async function saveMany(records){ for(const r of records) await put(r); await render(); }
 
@@ -32,10 +34,38 @@ function parseAmount(str){
   return m ? Number(m[0]) : 0;
 }
 function pick(pattern,text){ const m=text.match(pattern); return m ? m[1] : ''; }
+function normalizePdfText(text){
+  return String(text || '')
+    .replace(/\u00a0/g, ' ')
+    .replace(/[¥￥]\s+/g, '￥')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
 function parseJapanesePeriod(text){
-  const m=text.match(/(20\d{2})年(\d{1,2})月(\d{1,2})日[^-]+-\s*(20\d{2})年(\d{1,2})月(\d{1,2})日/);
-  if(!m) return {from:today(),to:today(),year:new Date().getFullYear()};
-  return {from:toISODate(m[1],m[2],m[3]), to:toISODate(m[4],m[5],m[6]), year:Number(m[4])};
+  const t = normalizePdfText(text);
+  const m = t.match(/(20\d{2})\s*年\s*(\d{1,2})\s*月\s*(\d{1,2})\s*日[\s\S]{0,80}?[-–—－〜~][\s\S]{0,80}?(20\d{2})\s*年\s*(\d{1,2})\s*月\s*(\d{1,2})\s*日/);
+  if(!m) return {from:'',to:'',year:new Date().getFullYear(), ok:false};
+  return {from:toISODate(m[1],m[2],m[3]), to:toISODate(m[4],m[5],m[6]), year:Number(m[4]), ok:true};
+}
+function yenAfterLabel(text, label, mode='first'){
+  const t = normalizePdfText(text);
+  const re = new RegExp(label + '[^￥¥-]{0,80}[-]?[￥¥]\\s*([0-9][0-9,]*)', 'g');
+  const vals = [];
+  let m;
+  while((m = re.exec(t)) !== null) vals.push(parseAmount(m[1]));
+  if(!vals.length) return 0;
+  return mode === 'last' ? vals[vals.length - 1] : vals[0];
+}
+function parseUberSummary(text){
+  const t = normalizePdfText(text);
+  const detailStart = t.indexOf('売り上げ の明細');
+  const detail = detailStart >= 0 ? t.slice(detailStart, detailStart + 800) : t;
+  const sales = yenAfterLabel(detail, '売り上げ', 'last') || yenAfterLabel(t, '最終残高', 'last');
+  const fee = yenAfterLabel(detail, '配送料', 'first');
+  const quest = yenAfterLabel(detail, 'クエスト', 'first');
+  const tip = yenAfterLabel(detail, 'チップ', 'first');
+  const payout = yenAfterLabel(t, '銀行口座に振り込まれました', 'first') || yenAfterLabel(t, '銀行口座に振込済み', 'first') || 0;
+  return {sales, fee, quest, tip, payout};
 }
 
 async function readPdfText(file){
@@ -54,14 +84,11 @@ async function readPdfText(file){
 
 function parseUberPdf(text,fileName){
   const period=parseJapanesePeriod(text);
-  const summaryBlock=text.replace(/\s+/g,' ');
-  const sales=parseAmount(pick(/売り上げ\s*￥([\d,]+)/, summaryBlock));
-  const fee=parseAmount(pick(/配送料\s*￥([\d,]+)/, summaryBlock));
-  const quest=parseAmount(pick(/クエスト\s*￥([\d,]+)/, summaryBlock));
-  const tip=parseAmount(pick(/チップ\s*￥([\d,]+)/, summaryBlock));
-  const payout=parseAmount(pick(/銀行口座に振り込まれました\s*￥([\d,]+)/, summaryBlock)) || parseAmount(pick(/銀行口座に振込済み[^-]+-￥([\d,]+)/, summaryBlock));
+  const {sales, fee, quest, tip, payout}=parseUberSummary(text);
+  if(!period.ok) throw new Error('明細期間を読み取れませんでした。UberEatsの週次明細PDFか確認してください。');
+  if(!sales || sales <= 0) throw new Error('売上金額を読み取れませんでした。PDFの文字情報が取得できていない可能性があります。');
   return [{
-    id: uid(), type:'income', source:'UberEats PDF', date:period.to, amount:sales,
+    id: `uber-${period.from}-${period.to}-${sales}`, type:'income', source:'UberEats PDF', date:period.to, amount:sales,
     partner:'Uber Eats', account:'売上高', tax:'課税売上10%',
     memo:`${period.from}〜${period.to} UberEats売上 / 配送料 ${yen(fee)} / クエスト ${yen(quest)} / チップ ${yen(tip)} / 振込 ${yen(payout)}`,
     details:{fileName, period, fee, quest, tip, payout}, createdAt:new Date().toISOString()
@@ -191,6 +218,6 @@ function bind(){
 }
 
 (async function init(){
-  await openDB(); bind(); $('#expenseDate').value=today(); $('#exportFrom').value=`${new Date().getFullYear()}-01-01`; $('#exportTo').value=today(); await render();
+  await openDB(); await cleanupBrokenUber(); bind(); $('#expenseDate').value=today(); $('#exportFrom').value=`${new Date().getFullYear()}-01-01`; $('#exportTo').value=today(); await render();
   if('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(()=>{});
 })();
