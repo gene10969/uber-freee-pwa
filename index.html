@@ -1,0 +1,161 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>Uber × freee 確定申告管理</title>
+  <meta name="theme-color" content="#0b0906" />
+  <meta name="description" content="UberEats明細PDF・経費レシート・クレカ明細をまとめて管理し、freee取込用CSVを出力するPWA" />
+  <link rel="manifest" href="manifest.webmanifest" />
+  <link rel="icon" href="assets/icon.svg" type="image/svg+xml" />
+  <link rel="apple-touch-icon" href="assets/apple-touch-icon.svg" />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div class="bg-mark">gene</div>
+  <header class="topbar">
+    <div>
+      <p class="eyebrow">UberEats / freee</p>
+      <h1>確定申告管理</h1>
+    </div>
+    <button id="installBtn" class="ghost hidden">ホーム画面に追加</button>
+  </header>
+
+  <main>
+    <section class="hero card">
+      <div>
+        <p class="eyebrow">PWA</p>
+        <h2>配達売上・経費・クレカ明細を一括管理</h2>
+        <p>PDF・写真・CSVを取り込み、月別集計とfreee取込用CSVを作成します。データは端末内に保存されます。</p>
+      </div>
+      <div class="hero-stats">
+        <div><span id="yearTotal">0</span><small>年間売上</small></div>
+        <div><span id="yearExpense">0</span><small>年間経費</small></div>
+        <div><span id="yearProfit">0</span><small>概算利益</small></div>
+      </div>
+    </section>
+
+    <nav class="tabs" aria-label="機能切替">
+      <button class="tab active" data-tab="dashboard">集計</button>
+      <button class="tab" data-tab="uber">Uber PDF</button>
+      <button class="tab" data-tab="expense">経費</button>
+      <button class="tab" data-tab="card">クレカ明細</button>
+      <button class="tab" data-tab="freee">freee出力</button>
+      <button class="tab" data-tab="data">データ</button>
+    </nav>
+
+    <section id="dashboard" class="panel active">
+      <div class="grid two">
+        <div class="card">
+          <div class="section-head">
+            <h3>月別集計</h3>
+            <select id="yearFilter" class="input small"></select>
+          </div>
+          <div id="monthlyList" class="list"></div>
+        </div>
+        <div class="card">
+          <h3>最近の取引</h3>
+          <div id="recentList" class="list compact"></div>
+        </div>
+      </div>
+    </section>
+
+    <section id="uber" class="panel">
+      <div class="card">
+        <h3>UberEats 配達明細PDFを取り込む</h3>
+        <p class="muted">週次PDFを複数選択できます。売上、配送料、クエスト、チップ、振込額を自動抽出します。</p>
+        <label class="dropzone">
+          <input id="uberPdfInput" type="file" accept="application/pdf" multiple />
+          <span>PDFを選択 / ここに取り込み</span>
+        </label>
+        <div id="uberPreview" class="preview"></div>
+      </div>
+    </section>
+
+    <section id="expense" class="panel">
+      <div class="grid two">
+        <div class="card">
+          <h3>レシート・経費写真</h3>
+          <p class="muted">スマホカメラで撮影、またはスクショを選択できます。OCRは補助機能です。最終金額は確認して保存してください。</p>
+          <label class="dropzone">
+            <input id="receiptInput" type="file" accept="image/*" capture="environment" />
+            <span>レシートを撮影 / 写真を選択</span>
+          </label>
+          <div id="receiptPreview" class="image-preview"></div>
+        </div>
+        <form id="expenseForm" class="card form-card">
+          <h3>経費を登録</h3>
+          <input id="expenseDate" class="input" type="date" required />
+          <input id="expenseVendor" class="input" placeholder="支払先 例：ヨドバシカメラ" required />
+          <input id="expenseAmount" class="input" type="number" inputmode="numeric" placeholder="金額" required />
+          <select id="expenseCategory" class="input">
+            <option>消耗品費</option>
+            <option>通信費</option>
+            <option>旅費交通費</option>
+            <option>車両費</option>
+            <option>荷造運賃</option>
+            <option>雑費</option>
+            <option>新聞図書費</option>
+            <option>支払手数料</option>
+          </select>
+          <textarea id="expenseMemo" class="input" placeholder="摘要・メモ"></textarea>
+          <button class="primary" type="submit">経費として保存</button>
+        </form>
+      </div>
+    </section>
+
+    <section id="card" class="panel">
+      <div class="card">
+        <h3>クレカ明細CSV / スクショ取込</h3>
+        <p class="muted">CSVは日付・内容・金額を自動判定します。スクショの場合は画像を保存し、必要項目を手入力します。</p>
+        <div class="grid two">
+          <label class="dropzone">
+            <input id="cardCsvInput" type="file" accept=".csv,text/csv" />
+            <span>クレカCSVを選択</span>
+          </label>
+          <label class="dropzone">
+            <input id="cardImageInput" type="file" accept="image/*" />
+            <span>クレカ明細スクショを選択</span>
+          </label>
+        </div>
+        <div id="cardPreview" class="preview"></div>
+      </div>
+    </section>
+
+    <section id="freee" class="panel">
+      <div class="grid two">
+        <div class="card">
+          <h3>freee取込用CSV</h3>
+          <p class="muted">売上は「売上高」、経費は登録カテゴリで出力します。週次売上は原則、期間終了日で1行登録します。</p>
+          <div class="row">
+            <input id="exportFrom" class="input" type="date" />
+            <input id="exportTo" class="input" type="date" />
+          </div>
+          <button id="exportFreeeBtn" class="primary">freee用CSVを出力</button>
+          <button id="exportBackupBtn" class="ghost">バックアップJSONを出力</button>
+        </div>
+        <div class="card">
+          <h3>出力形式</h3>
+          <div class="codebox">発生日,収支区分,勘定科目,取引先,金額,摘要,税区分,メモ</div>
+        </div>
+      </div>
+    </section>
+
+    <section id="data" class="panel">
+      <div class="card">
+        <h3>保存データ</h3>
+        <div class="actions">
+          <button id="clearAllBtn" class="danger">全データ削除</button>
+          <label class="ghost filebtn">バックアップ復元<input id="restoreInput" type="file" accept="application/json" /></label>
+        </div>
+        <div id="allRecords" class="list compact"></div>
+      </div>
+    </section>
+  </main>
+
+  <div id="toast" class="toast"></div>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

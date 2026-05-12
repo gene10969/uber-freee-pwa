@@ -1,0 +1,13 @@
+{
+  "name":"Uber × freee 確定申告管理",
+  "short_name":"Uber freee",
+  "start_url":"./index.html",
+  "scope":"./",
+  "display":"standalone",
+  "background_color":"#0b0906",
+  "theme_color":"#0b0906",
+  "icons":[
+    {"src":"assets/icon.svg","sizes":"any","type":"image/svg+xml"},
+    {"src":"assets/apple-touch-icon.svg","sizes":"180x180","type":"image/svg+xml"}
+  ]
+}
